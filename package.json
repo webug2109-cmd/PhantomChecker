@@ -1,0 +1,94 @@
+{
+  "name": "phantom-checker",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "lint": "oxlint",
+    "preview": "vite preview",
+    "electron:dev": "NODE_ENV=development electron .",
+    "electron:build": "vite build && electron-builder --win --x64",
+    "keygen:build": "pkg keygen/keygen.cjs --targets node18-win-x64 --output dist-keygen/phantom-keygen.exe",
+    "build:all": "npm run electron:build && npm run keygen:build"
+  },
+  "dependencies": {
+    "imapflow": "^2.0.0",
+    "lucide-react": "^1.42.0",
+    "mailparser": "^3.9.23",
+    "nodemailer": "^10.0.1",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "socks": "^2.8.10"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.1.0",
+    "electron": "^32.3.3",
+    "electron-builder": "^25.1.8",
+    "ffmpeg-static": "^5.3.0",
+    "oxlint": "^1.79.0",
+    "pkg": "^5.8.1",
+    "vite": "^8.2.2"
+  },
+  "build": {
+    "appId": "com.phantom.checker",
+    "productName": "Phantom Checker",
+    "copyright": "Phantom Software 2026",
+    "asar": true,
+    "forceCodeSigning": false,
+    "asarUnpack": [
+      "node_modules/socks/**",
+      "node_modules/imapflow/**",
+      "node_modules/mailparser/**",
+      "node_modules/nodemailer/**"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "public/icon.ico",
+      "sign": null,
+      "signingHashAlgorithms": null,
+      "certificateSubjectName": null
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Phantom Checker"
+    },
+    "files": [
+      "dist/**",
+      "electron/**",
+      "src/server/**",
+      "src/data/**",
+      "node_modules/**",
+      "package.json"
+    ],
+    "extraResources": [],
+    "directories": {
+      "output": "dist-electron",
+      "buildResources": "public"
+    }
+  },
+  "allowScripts": {
+    "electron@32.3.3": true,
+    "ffmpeg-static@5.3.0": true
+  }
+}
