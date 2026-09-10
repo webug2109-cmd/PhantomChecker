@@ -1,1 +1,2 @@
+*.exe filter=lfs diff=lfs merge=lfs -text
 dist-electron/win-unpacked/Phantom[[:space:]]Checker.exe filter=lfs diff=lfs merge=lfs -text
