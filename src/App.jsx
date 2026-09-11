@@ -413,7 +413,7 @@ export default function App() {
   const fetchRealFoldersForHit = useCallback(async (item, proxy = null) => {
     try {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 12000);
+      const timer = setTimeout(() => controller.abort(), 30000);
       const res = await fetch('/api/fetch-all-folders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -424,7 +424,7 @@ export default function App() {
           email: item.email,
           password: item.password,
           maxPerFolder: 10,
-          timeout: 10000,
+          timeout: 25000,
           keywords: keywords.map(k => k.keyword),
           proxy
         })
@@ -432,9 +432,18 @@ export default function App() {
       clearTimeout(timer);
       const data = await res.json();
       if (data.success && data.mails && data.mails.length > 0) {
+        // Merge by mail id instead of replacing the account's mails wholesale:
+        // this background scan only fetches 10 per folder, and replacing would
+        // silently shrink a deeper manual fetch (100+) that landed earlier.
         setMails(prev => {
-          const filtered = prev.filter(m => m.email.toLowerCase() !== item.email.toLowerCase());
-          return [...data.mails, ...filtered];
+          const lowerEmail = item.email.toLowerCase();
+          const byId = new Map();
+          prev.forEach(m => {
+            if (m.email.toLowerCase() === lowerEmail) byId.set(m.id, m);
+          });
+          data.mails.forEach(m => byId.set(m.id, m));
+          const merged = Array.from(byId.values());
+          return [...merged, ...prev.filter(m => m.email.toLowerCase() !== lowerEmail)];
         });
 
         const allHits = new Set();
@@ -452,7 +461,7 @@ export default function App() {
   }, [keywords]);
 
   const processFolderFetchQueue = useCallback(() => {
-    if (activeFolderFetchesRef.current >= 2 || folderFetchQueueRef.current.length === 0) return;
+    if (activeFolderFetchesRef.current >= 4 || folderFetchQueueRef.current.length === 0) return;
     const task = folderFetchQueueRef.current.shift();
     if (!task) return;
     activeFolderFetchesRef.current++;
