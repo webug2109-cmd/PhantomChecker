@@ -7,6 +7,7 @@ import {
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Archive
 } from 'lucide-react';
 import { getWebmailUrl, getProviderName, getImapConfigForEmail, getImapUri, getSmtpConfigForEmail } from '../../data/canadianDomains.js';
+import { mergeCaptures } from '../../server/captureService.js';
 
 export function MailViewerTab({ 
   mailboxes = [], 
@@ -71,6 +72,11 @@ export function MailViewerTab({
   const currentAccountMails = useMemo(() => {
     return mails.filter(m => m.email.toLowerCase() === selectedAccount.toLowerCase());
   }, [mails, selectedAccount]);
+
+  // Account-level full capture (membership tiers + payment methods) across mails
+  const accountCaptures = useMemo(() => {
+    return mergeCaptures(currentAccountMails.map(m => m.captures));
+  }, [currentAccountMails]);
 
   // Dynamic folders list supporting all standard & custom IMAP folders
   const folders = useMemo(() => {
@@ -616,6 +622,22 @@ export function MailViewerTab({
                 <Plus size={13} /> Add Live Hit
               </button>
             </div>
+
+            {/* Full-Capture badges: membership tiers + payment methods */}
+            {(accountCaptures.services.length > 0 || accountCaptures.payments.length > 0) && (
+              <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap', marginTop: '7px' }}>
+                {accountCaptures.services.map((s, si) => (
+                  <span key={`cap-svc-${si}`} style={{ background: 'rgba(0,229,255,0.12)', border: '1px solid rgba(0,229,255,0.4)', color: '#00e5ff', padding: '2px 8px', borderRadius: '5px', fontSize: '0.65rem', fontWeight: 700 }}>
+                    {s.tier ? `${s.label} ${s.tier}` : s.label}
+                  </span>
+                ))}
+                {accountCaptures.payments.map((p, pi) => (
+                  <span key={`cap-pay-${pi}`} style={{ background: 'rgba(0,255,157,0.1)', border: '1px solid rgba(0,255,157,0.35)', color: '#00ff9d', padding: '2px 8px', borderRadius: '5px', fontSize: '0.65rem', fontFamily: "'JetBrains Mono', monospace" }}>
+                    {p.label}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 

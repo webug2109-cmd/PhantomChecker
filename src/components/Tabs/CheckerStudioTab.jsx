@@ -222,6 +222,7 @@ export function CheckerStudioTab({
             {[
               { label: 'CHECKS PER MIN (CPM)', val: stats.cpm, color: '#00ff9d', borderColor: 'rgba(0,255,157,0.4)', badge: 'SPEED' },
               { label: 'VALID HITS', val: stats.validHits, color: '#00ff9d', borderColor: 'rgba(0,255,157,0.3)' },
+              { label: 'CAPTURED HITS', val: stats.capturedHits ?? 0, color: '#00e5ff', borderColor: 'rgba(0,229,255,0.4)', badge: 'FULL' },
               { label: 'CANADIAN HITS', val: stats.canadianHits, color: '#b026ff', borderColor: 'rgba(176,38,255,0.4)' },
               { label: 'INVALID / BAD', val: stats.invalid, color: '#f87171', borderColor: 'rgba(255,255,255,0.1)' }
             ].map((m, i) => (
@@ -245,6 +246,7 @@ export function CheckerStudioTab({
               >
                 <option value="txt">Format: email:pass</option>
                 <option value="txt_full">Format: email:pass:host:port</option>
+                <option value="captures">Format: Captures Only</option>
                 <option value="csv">Format: CSV</option>
                 <option value="json">Format: JSON</option>
               </select>
@@ -279,7 +281,7 @@ export function CheckerStudioTab({
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem' }}>
             <thead style={{ background: '#0b0e17', color: '#8b9bb4', fontFamily: "'JetBrains Mono', monospace", textTransform: 'uppercase', position: 'sticky', top: 0, zIndex: 10 }}>
               <tr>
-                {['Status', 'Email Address', 'Password', 'Live Provider & IMAP', 'Targets Detected', 'Live Actions'].map(h => (
+                {['Status', 'Email Address', 'Password', 'Live Provider & IMAP', 'Targets Detected', 'Captures', 'Live Actions'].map(h => (
                   <th key={h} style={{ padding: '12px', textAlign: h === 'Live Actions' ? 'right' : 'left', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>{h}</th>
                 ))}
               </tr>
@@ -287,7 +289,7 @@ export function CheckerStudioTab({
             <tbody>
               {displayedCombos.length === 0 ? (
                 <tr>
-                  <td colSpan={6} style={{ padding: '48px', textAlign: 'center', color: '#8b9bb4' }}>
+                  <td colSpan={7} style={{ padding: '48px', textAlign: 'center', color: '#8b9bb4' }}>
                     <FileText size={32} color="rgba(255,255,255,0.1)" style={{ margin: '0 auto 8px', display: 'block' }} />
                     No combos loaded. Drag & drop a file or click "Load Verified Canadian Hits".
                   </td>
@@ -302,7 +304,7 @@ export function CheckerStudioTab({
 
                 const rows = [];
                 if (topPad > 0) {
-                  rows.push(<tr key="__top_spacer__"><td colSpan={6} style={{ height: `${topPad}px`, padding: 0, border: 'none' }} /></tr>);
+                  rows.push(<tr key="__top_spacer__"><td colSpan={7} style={{ height: `${topPad}px`, padding: 0, border: 'none' }} /></tr>);
                 }
                 for (let i = startIdx; i < endIdx; i++) {
                   const item = displayedCombos[i];
@@ -362,6 +364,25 @@ export function CheckerStudioTab({
                         </div>
                       </td>
 
+                      {/* Full Captures: membership tiers + payment methods */}
+                      <td style={{ padding: '10px 12px' }}>
+                        <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                          {(item.captures?.services || []).map((s, si) => (
+                            <span key={`svc-${si}`} style={{ background: 'rgba(0,229,255,0.12)', border: '1px solid rgba(0,229,255,0.4)', color: '#00e5ff', padding: '1px 6px', borderRadius: '4px', fontSize: '0.65rem', fontWeight: 600 }}>
+                              {s.tier ? `${s.label} ${s.tier}` : s.label}
+                            </span>
+                          ))}
+                          {(item.captures?.payments || []).map((p, pi) => (
+                            <span key={`pay-${pi}`} style={{ background: 'rgba(0,255,157,0.1)', border: '1px solid rgba(0,255,157,0.35)', color: '#00ff9d', padding: '1px 6px', borderRadius: '4px', fontSize: '0.65rem', fontFamily: "'JetBrains Mono', monospace" }}>
+                              {p.label}
+                            </span>
+                          ))}
+                          {(!item.captures || ((item.captures.services || []).length === 0 && (item.captures.payments || []).length === 0)) && (
+                            <span style={{ color: 'rgba(255,255,255,0.15)' }}>-</span>
+                          )}
+                        </div>
+                      </td>
+
                       {/* Actions */}
                       <td style={{ padding: '10px 12px', textAlign: 'right' }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '6px' }}>
@@ -391,7 +412,7 @@ export function CheckerStudioTab({
                   );
                 }
                 if (bottomPad > 0) {
-                  rows.push(<tr key="__bottom_spacer__"><td colSpan={6} style={{ height: `${bottomPad}px`, padding: 0, border: 'none' }} /></tr>);
+                  rows.push(<tr key="__bottom_spacer__"><td colSpan={7} style={{ height: `${bottomPad}px`, padding: 0, border: 'none' }} /></tr>);
                 }
                 return rows;
               })()}

