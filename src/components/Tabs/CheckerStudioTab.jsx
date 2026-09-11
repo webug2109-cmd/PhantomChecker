@@ -349,7 +349,7 @@ export function CheckerStudioTab({
                       <td style={{ padding: '10px 12px', fontSize: '0.7rem' }}>
                         <div style={{ color: '#fff', fontWeight: 600 }}>{provider}</div>
                         <div style={{ color: '#00e5ff', fontFamily: "'JetBrains Mono', monospace" }}>
-                          {item.imapHost ? `${item.imapHost}:${item.imapPort}` : 'imap.bell.net:993'}
+                          {item.imapHost ? `${item.imapHost}:${item.imapPort}` : '—'}
                         </div>
                       </td>
 

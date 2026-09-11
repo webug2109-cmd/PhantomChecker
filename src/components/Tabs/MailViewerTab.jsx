@@ -170,6 +170,22 @@ export function MailViewerTab({
     }
   }, [mailboxes, selectedAccount, setSelectedAccount]);
 
+  // Auto-fetch the inbox as soon as an account is selected but has no mails
+  // loaded, instead of silently waiting on the background queue or requiring a
+  // manual refresh. One attempt per account per session; manual refresh still works.
+  const autoFetchedAccountsRef = useRef(new Set());
+  const liveFetchFnRef = useRef(null);
+
+  useEffect(() => {
+    if (!selectedAccount || isFetchingLive) return;
+    if (currentAccountMails.length > 0) return;
+    if (!password) return;
+    const key = selectedAccount.trim().toLowerCase();
+    if (autoFetchedAccountsRef.current.has(key)) return;
+    autoFetchedAccountsRef.current.add(key);
+    liveFetchFnRef.current?.(selectedAccount, password, false, 50);
+  }, [selectedAccount, currentAccountMails.length, isFetchingLive, password]);
+
   // Prepared sanitized isolated HTML body with contained scrolling
   const preparedHtmlBody = useMemo(() => {
     if (!activeMail?.htmlBody) return '';
@@ -197,11 +213,13 @@ export function MailViewerTab({
     return `${injectedStyle}${activeMail.htmlBody}`;
   }, [activeMail]);
 
-  // Auto-refresh interval (every 25 seconds if enabled)
+  // Auto-refresh interval (every 25 seconds if enabled).
+  // Calls through liveFetchFnRef so every tick uses the latest fetch function
+  // and credentials instead of a stale closure from the render that started it.
   useEffect(() => {
     if (!autoRefresh || !selectedAccount) return;
     const timer = setInterval(() => {
-      handleFetchAllRealFolders(selectedAccount, password, true);
+      liveFetchFnRef.current?.(selectedAccount, password, true);
     }, 25000);
     return () => clearInterval(timer);
   }, [autoRefresh, selectedAccount, password]);
@@ -209,27 +227,48 @@ export function MailViewerTab({
   // Fetch real Inbox, Spam, Trash, Sent from IMAP server / Refresh for new incoming emails
   const handleFetchAllRealFolders = async (accountToFetch = selectedAccount, passToUse = password, isBackground = false, requestedLimit = 100) => {
     if (!accountToFetch || isFetchingLive) return;
+    // Never send a garbage password — without one the request is guaranteed to
+    // fail with a confusing IMAP auth error. Tell the user what's actually wrong.
+    if (!passToUse) {
+      setLiveFetchStatus({
+        type: 'error',
+        text: 'No password on file for this account. Reload the combo list it came from, or use "Add Live Hit" to store its password.'
+      });
+      setTimeout(() => setLiveFetchStatus(null), 8000);
+      return;
+    }
     setIsFetchingLive(true);
     const config = getImapConfigForEmail(accountToFetch);
     if (!isBackground) {
       setLiveFetchStatus({ type: 'info', text: `Connecting to ${config.host}:${config.port}... digging deep across folders (${requestedLimit} per folder)` });
     }
 
+    const controller = new AbortController();
+    const clientTimer = setTimeout(() => controller.abort(), 30000);
+
     try {
       const res = await fetch('/api/fetch-all-folders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
           host: config.host,
           port: config.port,
           email: accountToFetch,
-          password: passToUse || 'password',
+          password: passToUse,
           maxPerFolder: requestedLimit,
+          timeout: 25000,
           keywords: keywords.map(k => k.keyword)
         })
       });
+      clearTimeout(clientTimer);
 
-      const data = await res.json();
+      let data;
+      try {
+        data = await res.json();
+      } catch {
+        throw new Error(`Server error (HTTP ${res.status})`);
+      }
       setLastRefreshedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
 
       if (data.success) {
@@ -276,28 +315,34 @@ export function MailViewerTab({
           }
         }
       } else {
-        if (!isBackground) {
-          setLiveFetchStatus({
-            type: 'error',
-            text: `IMAP error on ${config.host}: ${data.error || 'Authentication failed or mailbox unavailable'}`
-          });
-          setToastMessage({
-            type: 'error',
-            text: `Failed to refresh: ${data.error || 'IMAP error'}`
-          });
-        }
+        // Surface fetch failures even in background/auto-refresh mode — a
+        // silent failure looks identical to "no new mail" otherwise.
+        setLiveFetchStatus({
+          type: 'error',
+          text: `IMAP error on ${config.host}: ${data.error || 'Authentication failed or mailbox unavailable'}`
+        });
+        setToastMessage({
+          type: 'error',
+          text: `Failed to refresh: ${data.error || 'IMAP error'}`
+        });
       }
     } catch (err) {
-      if (!isBackground) {
-        setLiveFetchStatus({ type: 'error', text: `Live IMAP connection failed: ${err.message}` });
-        setToastMessage({ type: 'error', text: `Connection error: ${err.message}` });
-      }
+      const msg = err.name === 'AbortError'
+        ? 'Connection timed out after 30s'
+        : (err.message || 'Unknown connection error');
+      setLiveFetchStatus({ type: 'error', text: `Live IMAP connection failed: ${msg}` });
+      setToastMessage({ type: 'error', text: `Connection error: ${msg}` });
     } finally {
+      clearTimeout(clientTimer);
       setIsFetchingLive(false);
       setTimeout(() => setLiveFetchStatus(null), 8000);
       setTimeout(() => setToastMessage(null), 4000);
     }
   };
+
+  // Keep the ref pointing at the latest closure so the auto-refresh interval
+  // and the auto-fetch effect always call the current version.
+  liveFetchFnRef.current = handleFetchAllRealFolders;
 
   const handleConnectManual = (e) => {
     e.preventDefault();

