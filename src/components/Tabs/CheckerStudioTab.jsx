@@ -15,7 +15,7 @@ export function CheckerStudioTab({
   onExportHits, filterOnlyCanadian, setFilterOnlyCanadian,
   threads, setThreads, timeoutSec, setTimeoutSec, onInspectMail,
   useLiveSocket, setUseLiveSocket, proxyMode, proxyCount, setActiveTab,
-  parsingStatus
+  parsingStatus, onRemoveDuplicates
 }) {
   const fileInputRef = useRef(null);
   const folderInputRef = useRef(null);
@@ -50,10 +50,11 @@ export function CheckerStudioTab({
     }
     const q = searchTerm ? searchTerm.toLowerCase().trim() : '';
     return combos.filter(item => {
+      if (!item) return false;
       if (filterOnlyCanadian && !item.isCanadian) return false;
       if (statusFilter !== 'all' && item.status !== statusFilter) return false;
       if (q) {
-        return item.email.toLowerCase().includes(q) || item.domain.toLowerCase().includes(q);
+        return (item.email || '').toLowerCase().includes(q) || (item.domain || '').toLowerCase().includes(q);
       }
       return true;
     });
@@ -87,7 +88,7 @@ export function CheckerStudioTab({
         </div>
       )}
       {/* Top Controls Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '24px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(290px, 1fr))', gap: '20px' }}>
         
         {/* File Upload Panel */}
         <div className="glass-panel" style={{ padding: '24px' }} onDragOver={handleDragOver} onDrop={handleDrop}>
@@ -107,11 +108,11 @@ export function CheckerStudioTab({
             <p style={{ fontSize: '0.75rem', color: '#8b9bb4', marginBottom: '12px' }}>
               Drag & Drop combo files here or select below
             </p>
-            <div style={{ display: 'flex', justifyContent: 'center', gap: '12px' }}>
-              <button onClick={() => fileInputRef.current?.click()} className="glass-btn glass-btn-purple" style={{ fontSize: '0.75rem', padding: '8px 12px' }}>
+            <div style={{ display: 'flex', justifyContent: 'center', gap: '10px' }}>
+              <button onClick={() => fileInputRef.current?.click()} className="glass-btn glass-btn-purple" style={{ fontSize: '0.75rem', padding: '8px 12px', flex: 1, justifyContent: 'center', minWidth: 0, whiteSpace: 'nowrap' }}>
                 <FileText size={16} /> Select File
               </button>
-              <button onClick={() => folderInputRef.current?.click()} className="glass-btn glass-btn-green" style={{ fontSize: '0.75rem', padding: '8px 12px' }}>
+              <button onClick={() => folderInputRef.current?.click()} className="glass-btn glass-btn-green" style={{ fontSize: '0.75rem', padding: '8px 12px', flex: 1, justifyContent: 'center', minWidth: 0, whiteSpace: 'nowrap' }}>
                 <FolderPlus size={16} /> Load Folder
               </button>
             </div>
@@ -121,11 +122,17 @@ export function CheckerStudioTab({
               onChange={(e) => e.target.files && onFolderUpload(e.target.files)} />
           </div>
 
-          <div style={{ marginTop: '14px' }}>
+          <div style={{ marginTop: '14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
             <button onClick={onLoadSampleCombos}
               style={{ fontSize: '0.75rem', color: '#00e5ff', background: 'none', border: 'none', cursor: 'pointer', fontFamily: "'JetBrains Mono', monospace", display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <RefreshCw size={12} /> Load Verified Canadian Hits & ISP List
+              <RefreshCw size={12} /> Load Verified Hits
             </button>
+            {onRemoveDuplicates && (
+              <button onClick={onRemoveDuplicates} disabled={combos.length === 0}
+                style={{ fontSize: '0.72rem', color: '#00ff9d', background: 'rgba(0,255,157,0.1)', border: '1px solid rgba(0,255,157,0.3)', borderRadius: '6px', padding: '3px 8px', cursor: combos.length === 0 ? 'not-allowed' : 'pointer', fontFamily: "'JetBrains Mono', monospace", display: 'flex', alignItems: 'center', gap: '4px', opacity: combos.length === 0 ? 0.5 : 1 }}>
+                <Check size={11} /> Deduplicate ({combos.length})
+              </button>
+            )}
           </div>
         </div>
 
@@ -220,15 +227,15 @@ export function CheckerStudioTab({
           </h3>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
             {[
-              { label: 'CHECKS PER MIN (CPM)', val: stats.cpm, color: '#00ff9d', borderColor: 'rgba(0,255,157,0.4)', badge: 'SPEED' },
+              { label: 'CPM (SPEED)', val: stats.cpm, color: '#00ff9d', borderColor: 'rgba(0,255,157,0.4)', badge: 'LIVE' },
               { label: 'VALID HITS', val: stats.validHits, color: '#00ff9d', borderColor: 'rgba(0,255,157,0.3)' },
               { label: 'CANADIAN HITS', val: stats.canadianHits, color: '#b026ff', borderColor: 'rgba(176,38,255,0.4)' },
               { label: 'INVALID / BAD', val: stats.invalid, color: '#f87171', borderColor: 'rgba(255,255,255,0.1)' }
             ].map((m, i) => (
               <div key={i} style={{ background: 'rgba(0,0,0,0.5)', border: `1px solid ${m.borderColor}`, padding: '10px 12px', borderRadius: '12px' }}>
-                <div style={{ fontSize: '0.62rem', color: '#8b9bb4', fontFamily: "'JetBrains Mono', monospace", display: 'flex', justifyContent: 'space-between' }}>
-                  <span>{m.label}</span>
-                  {m.badge && <span style={{ color: '#00ff9d', fontWeight: 800 }}>{m.badge}</span>}
+                <div style={{ fontSize: '0.62rem', color: '#8b9bb4', fontFamily: "'JetBrains Mono', monospace", display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
+                  <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.label}</span>
+                  {m.badge && <span style={{ color: '#00ff9d', fontWeight: 800, whiteSpace: 'nowrap' }}>{m.badge}</span>}
                 </div>
                 <div style={{ fontSize: '1.4rem', fontWeight: 800, color: m.color, fontFamily: "'JetBrains Mono', monospace" }}>{m.val}</div>
               </div>
@@ -245,8 +252,11 @@ export function CheckerStudioTab({
               >
                 <option value="txt">Format: email:pass</option>
                 <option value="txt_full">Format: email:pass:host:port</option>
-                <option value="csv">Format: CSV</option>
-                <option value="json">Format: JSON</option>
+                <option value="csv">Format: CSV (Standard)</option>
+                <option value="csv_full">Format: CSV + Assets & Balances</option>
+                <option value="json">Format: JSON (Pretty)</option>
+                <option value="jsonl">Format: JSONL (Streaming Lines)</option>
+                <option value="sql">Format: SQL Inserts (SQLite / PostgreSQL)</option>
               </select>
               <button onClick={() => onExportHits(exportFormat)} className="glass-btn glass-btn-green" style={{ fontSize: '0.75rem', padding: '6px 12px' }}>
                 <Download size={14} /> Export Hits

@@ -46,9 +46,9 @@ if not exist "node_modules\" (
     echo [*] This will only take a moment.
     echo.
     call npm install
-    if %ERRORLEVEL% NEQ 0 (
+    if errorlevel 1 (
         echo.
-        echo [ERROR] npm install failed with code %ERRORLEVEL%.
+        echo [ERROR] npm install failed.
         echo.
         pause
         exit /b 1

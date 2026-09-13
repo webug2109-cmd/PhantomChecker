@@ -25,6 +25,9 @@ const NUM_SEGMENTS = 4;
 const TOTAL_HEX = SEGMENT_LEN * NUM_SEGMENTS;
 
 function generateKey(machineId) {
+  if (typeof machineId !== 'string' || !/^[0-9a-fA-F]{64}$/.test(machineId.trim())) {
+    throw new Error('Machine ID must contain exactly 64 hexadecimal characters');
+  }
   const hmac = crypto.createHmac('sha256', MASTER_SECRET);
   hmac.update(machineId.toLowerCase().trim());
   const full = hmac.digest('hex').toUpperCase();

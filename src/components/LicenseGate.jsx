@@ -58,11 +58,17 @@ export function LicenseGate({ onLicensed }) {
     }
   };
 
-  const handleCopyMachineId = () => {
+  const handleCopyMachineId = async () => {
     if (!machineId || machineId === 'unavailable') return;
-    navigator.clipboard?.writeText(machineId);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(machineId);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }
+    } catch (err) {
+      console.error('Clipboard copy failed:', err);
+    }
   };
 
   const handleKeyDown = (e) => {

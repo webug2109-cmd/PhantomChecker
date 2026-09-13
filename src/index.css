@@ -61,7 +61,12 @@ code, pre, .font-mono {
   font-family: 'JetBrains Mono', monospace;
 }
 
-/* Custom Scrollbars */
+/* Custom Scrollbars (Cross-browser Firefox + WebKit) */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(176, 38, 255, 0.35) rgba(10, 12, 18, 0.8);
+}
+
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -269,6 +274,15 @@ code, pre, .font-mono {
   to { transform: rotate(360deg); }
 }
 
+.animate-spin {
+  animation: spin 1s linear infinite !important;
+}
+
+.progress-shimmer {
+  background-size: 200% 100%;
+  animation: progressShimmer 2s infinite linear;
+}
+
 @keyframes slideInRight {
   from { opacity: 0; transform: translateX(40px); }
   to   { opacity: 1; transform: translateX(0); }
@@ -278,3 +292,71 @@ code, pre, .font-mono {
   from { opacity: 0; transform: translateY(-8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+
+/* ── Ghost Splash Screen & Left Sidebar Animations ──────────────────────── */
+@keyframes splashPop {
+  0% {
+    opacity: 0;
+    transform: scale(0.82) translateY(20px);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.03) translateY(-4px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes ghostFloat {
+  0%, 100% {
+    transform: translateY(0px) rotate(0deg);
+    filter: drop-shadow(0 0 25px rgba(0, 229, 255, 0.45));
+  }
+  50% {
+    transform: translateY(-10px) rotate(1.5deg);
+    filter: drop-shadow(0 0 35px rgba(176, 38, 255, 0.6));
+  }
+}
+
+@keyframes progressShimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* Sidebar Navigation Items */
+.sidebar-tab-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.84rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  text-align: left;
+  position: relative;
+  overflow: hidden;
+}
+
+.sidebar-tab-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.08);
+  transform: translateX(3px);
+}
+
+.sidebar-tab-btn.active {
+  background: linear-gradient(135deg, rgba(176, 38, 255, 0.18), rgba(0, 229, 255, 0.1));
+  border: 1px solid rgba(0, 229, 255, 0.35);
+  color: #ffffff;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4), inset 0 0 15px rgba(0, 229, 255, 0.08);
+}
+

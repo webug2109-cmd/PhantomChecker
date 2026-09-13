@@ -567,16 +567,20 @@ export function isUSAEmail(email = '') {
   return USA_DOMAINS_DATABASE.some(item => item.domain === domain);
 }
 
+function hasUSADomainMatch(domain, targets) {
+  return targets.some(t => domain === t || domain.endsWith('.' + t));
+}
+
 export function getUSAImapConfigForEmail(email = '') {
   const domain = email.trim().toLowerCase().split('@')[1] || '';
-  const found = USA_DOMAINS_DATABASE.find(item => item.domain === domain);
+  const found = USA_DOMAINS_DATABASE.find(item => item.domain === domain || domain.endsWith('.' + item.domain));
   if (found) return { host: found.imapHost, port: found.imapPort, ssl: found.useSsl };
-  if (domain.includes('att.net') || domain.endsWith('.att.net')) return { host: 'imap.mail.att.net', port: 993, ssl: true };
-  if (domain.endsWith('.rr.com')) return { host: 'mail.twc.com', port: 993, ssl: true };
-  if (domain.includes('gmail') || domain.includes('googlemail')) return { host: 'imap.gmail.com', port: 993, ssl: true };
-  if (domain.includes('yahoo') || domain.includes('ymail') || domain.includes('rocketmail')) return { host: 'imap.mail.yahoo.com', port: 993, ssl: true };
-  if (domain.includes('hotmail') || domain.includes('outlook') || domain.includes('live') || domain.includes('msn')) return { host: 'outlook.office365.com', port: 993, ssl: true };
-  if (domain.includes('aol') || domain.includes('aim')) return { host: 'imap.aol.com', port: 993, ssl: true };
+  if (hasUSADomainMatch(domain, ['att.net', 'sbcglobal.net', 'pacbell.net', 'bellsouth.net'])) return { host: 'imap.mail.att.net', port: 993, ssl: true };
+  if (hasUSADomainMatch(domain, ['rr.com', 'twc.com', 'roadrunner.com'])) return { host: 'mail.twc.com', port: 993, ssl: true };
+  if (hasUSADomainMatch(domain, ['gmail.com', 'googlemail.com'])) return { host: 'imap.gmail.com', port: 993, ssl: true };
+  if (hasUSADomainMatch(domain, ['yahoo.com', 'ymail.com', 'rocketmail.com', 'myyahoo.com'])) return { host: 'imap.mail.yahoo.com', port: 993, ssl: true };
+  if (hasUSADomainMatch(domain, ['hotmail.com', 'outlook.com', 'live.com', 'msn.com'])) return { host: 'outlook.office365.com', port: 993, ssl: true };
+  if (hasUSADomainMatch(domain, ['aol.com', 'aim.com', 'verizon.net'])) return { host: 'imap.aol.com', port: 993, ssl: true };
   return { host: `imap.${domain}`, port: 993, ssl: true };
 }
 
@@ -584,7 +588,7 @@ const USA_MS_DOMAINS = ['hotmail.com', 'outlook.com', 'live.com', 'msn.com'];
 
 export function isUSAMicrosoftDomain(email = '') {
   const domain = email.trim().toLowerCase().split('@')[1] || '';
-  return USA_MS_DOMAINS.includes(domain) || domain.includes('hotmail') || domain.includes('outlook') || domain.includes('live.') || domain.includes('msn');
+  return hasUSADomainMatch(domain, USA_MS_DOMAINS);
 }
 
 export function getUSAWebmailUrl(email = '') {

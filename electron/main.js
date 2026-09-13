@@ -13,6 +13,7 @@ import {
   fetchAllRealFolders,
   deleteRealImapMessage,
   forwardRealEmail,
+  massForwardRealEmails,
   testProxyConnection
 } from '../src/server/imapService.js';
 import {
@@ -183,9 +184,49 @@ function startApiServer() {
 
           // ── /api/forward-mail ──
           if (req.url === '/api/forward-mail') {
-            const { host, port: fPort, smtpHost, smtpPort, email, password, to, subject, note, origBodyText, origBodyHtml, proxy } = body;
+            const { host, port: fPort, smtpHost, smtpPort, email, password, to, cc, bcc, subject, note, origBodyText, origBodyHtml, origSender, origDate, messageId, isReply, attachments, proxy } = body;
             if (!to) { sendJson(400, { error: 'Missing destination email (to)' }); return; }
-            const result = await forwardRealEmail({ host, port: Number(fPort) || 993, smtpHost, smtpPort: Number(smtpPort) || 587, user: email, pass: password, to, subject: subject || 'Fwd: Email Message', note, origBodyText: origBodyText || '', origBodyHtml: origBodyHtml || '', proxy: proxy || null });
+            const result = await forwardRealEmail({
+              host,
+              port: Number(fPort) || 993,
+              smtpHost,
+              smtpPort: Number(smtpPort) || 587,
+              user: email,
+              pass: password,
+              to,
+              cc: cc || '',
+              bcc: bcc || '',
+              subject: subject || (isReply ? 'Re: Email Message' : 'Fwd: Email Message'),
+              note,
+              origBodyText: origBodyText || '',
+              origBodyHtml: origBodyHtml || '',
+              origSender: origSender || '',
+              origDate: origDate || '',
+              messageId: messageId || '',
+              isReply: Boolean(isReply),
+              attachments: attachments || [],
+              proxy: proxy || null
+            });
+            sendJson(200, result);
+            return;
+          }
+
+          // ── /api/mass-forward-mail ──
+          if (req.url === '/api/mass-forward-mail') {
+            const { host, port: fPort, smtpHost, smtpPort, email, password, recipients, webhookUrl, messages, note, proxy } = body;
+            const result = await massForwardRealEmails({
+              host,
+              port: Number(fPort) || 993,
+              smtpHost,
+              smtpPort: Number(smtpPort) || 587,
+              user: email,
+              pass: password,
+              recipients: recipients || [],
+              webhookUrl: webhookUrl || '',
+              messages: messages || [],
+              note: note || '',
+              proxy: proxy || null
+            });
             sendJson(200, result);
             return;
           }

@@ -1015,17 +1015,21 @@ export const DOMAINS_DATABASE = [
   }
 ];
 
-// Backwards compatibility alias
-export const CANADIAN_DOMAINS_DATABASE = DOMAINS_DATABASE;
+// Canadian domains database filter
+export const CANADIAN_DOMAINS_DATABASE = DOMAINS_DATABASE.filter(d => d.country === 'CANADA' || d.countryCode === 'CA');
 
 export const USA_DOMAINS_DATABASE = DOMAINS_DATABASE.filter(d => d.country === 'USA');
+
+function hasDomainMatch(domain, targets) {
+  return targets.some(t => domain === t || domain.endsWith('.' + t));
+}
 
 export function isCanadianEmail(email = '') {
   const clean = email.trim().toLowerCase();
   const domain = clean.split('@')[1];
   if (!domain) return false;
   if (domain.endsWith('.ca')) return true;
-  return DOMAINS_DATABASE.some(item => item.domain === domain && item.country === 'CANADA');
+  return DOMAINS_DATABASE.some(item => (item.domain === domain || domain.endsWith('.' + item.domain)) && item.country === 'CANADA');
 }
 
 export function isUsaEmail(email = '') {
@@ -1033,41 +1037,41 @@ export function isUsaEmail(email = '') {
   const domain = clean.split('@')[1];
   if (!domain) return false;
   if (domain.endsWith('.us') || domain.endsWith('.edu')) return true;
-  return DOMAINS_DATABASE.some(item => item.domain === domain && item.country === 'USA');
+  return DOMAINS_DATABASE.some(item => (item.domain === domain || domain.endsWith('.' + item.domain)) && item.country === 'USA');
 }
 
 export function getImapConfigForEmail(email = '') {
   const domain = email.trim().toLowerCase().split('@')[1] || '';
-  const found = DOMAINS_DATABASE.find(item => item.domain === domain);
+  const found = DOMAINS_DATABASE.find(item => item.domain === domain || domain.endsWith('.' + item.domain));
   if (found) return { host: found.imapHost, port: found.imapPort, ssl: found.useSsl };
   
   if (domain.endsWith('.ca')) return { host: `mail.${domain}`, port: 993, ssl: true };
-  if (domain.includes('gmail') || domain.includes('googlemail')) return { host: 'imap.gmail.com', port: 993, ssl: true };
-  if (domain.includes('yahoo') || domain.includes('ymail') || domain.includes('rocketmail')) return { host: 'imap.mail.yahoo.com', port: 993, ssl: true };
-  if (domain.includes('aol') || domain.includes('aim') || domain.includes('verizon')) return { host: 'imap.aol.com', port: 993, ssl: true };
-  if (domain.includes('att') || domain.includes('sbcglobal') || domain.includes('bellsouth') || domain.includes('pacbell') || domain.includes('ameritech') || domain.includes('swbell') || domain.includes('prodigy')) {
+  if (hasDomainMatch(domain, ['gmail.com', 'googlemail.com'])) return { host: 'imap.gmail.com', port: 993, ssl: true };
+  if (hasDomainMatch(domain, ['yahoo.com', 'yahoo.ca', 'ymail.com', 'rocketmail.com'])) return { host: 'imap.mail.yahoo.com', port: 993, ssl: true };
+  if (hasDomainMatch(domain, ['aol.com', 'aim.com', 'verizon.net'])) return { host: 'imap.aol.com', port: 993, ssl: true };
+  if (hasDomainMatch(domain, ['att.net', 'sbcglobal.net', 'bellsouth.net', 'pacbell.net', 'ameritech.net', 'swbell.net', 'prodigy.net', 'flash.net', 'nvbell.net'])) {
     return { host: 'imap.mail.att.net', port: 993, ssl: true };
   }
-  if (domain.includes('comcast') || domain.includes('xfinity')) return { host: 'imap.ge.xfinity.com', port: 993, ssl: true };
-  if (domain.includes('charter') || domain.includes('spectrum')) return { host: 'mobile.charter.net', port: 993, ssl: true };
-  if (domain.includes('twc') || domain.includes('roadrunner') || domain.includes('rr.com')) return { host: 'mail.twc.com', port: 993, ssl: true };
-  if (domain.includes('cox')) return { host: 'imap.mail.yahoo.com', port: 993, ssl: true };
-  if (domain.includes('centurylink') || domain.includes('embarq') || domain.includes('qwest')) return { host: 'mail.centurylink.net', port: 993, ssl: true };
-  if (domain.includes('optimum') || domain.includes('optonline')) return { host: 'mail.optimum.net', port: 993, ssl: true };
-  if (domain.includes('earthlink') || domain.includes('mindspring')) return { host: 'imap.earthlink.net', port: 993, ssl: true };
-  if (domain.includes('windstream')) return { host: 'imap.windstream.net', port: 993, ssl: true };
-  if (domain.includes('icloud') || domain.includes('me.com') || domain.includes('mac.com')) return { host: 'imap.mail.me.com', port: 993, ssl: true };
-  if (domain.includes('hotmail') || domain.includes('outlook') || domain.includes('live') || domain.includes('msn')) {
+  if (hasDomainMatch(domain, ['comcast.net', 'xfinity.com'])) return { host: 'imap.ge.xfinity.com', port: 993, ssl: true };
+  if (hasDomainMatch(domain, ['charter.net', 'spectrum.net'])) return { host: 'mobile.charter.net', port: 993, ssl: true };
+  if (hasDomainMatch(domain, ['twc.com', 'roadrunner.com', 'rr.com'])) return { host: 'mail.twc.com', port: 993, ssl: true };
+  if (hasDomainMatch(domain, ['cox.net'])) return { host: 'imap.mail.yahoo.com', port: 993, ssl: true };
+  if (hasDomainMatch(domain, ['centurylink.net', 'embarqmail.com', 'qwest.net'])) return { host: 'mail.centurylink.net', port: 993, ssl: true };
+  if (hasDomainMatch(domain, ['optimum.net', 'optonline.net'])) return { host: 'mail.optimum.net', port: 993, ssl: true };
+  if (hasDomainMatch(domain, ['earthlink.net', 'mindspring.com'])) return { host: 'imap.earthlink.net', port: 993, ssl: true };
+  if (hasDomainMatch(domain, ['windstream.net'])) return { host: 'imap.windstream.net', port: 993, ssl: true };
+  if (hasDomainMatch(domain, ['icloud.com', 'me.com', 'mac.com'])) return { host: 'imap.mail.me.com', port: 993, ssl: true };
+  if (hasDomainMatch(domain, MS_DOMAINS)) {
     return { host: 'outlook.office365.com', port: 993, ssl: true };
   }
   return { host: `imap.${domain}`, port: 993, ssl: true };
 }
 
-const MS_DOMAINS = ['hotmail.ca', 'hotmail.com', 'live.ca', 'live.com', 'outlook.com', 'outlook.ca', 'msn.com'];
+const MS_DOMAINS = ['hotmail.ca', 'hotmail.com', 'live.ca', 'live.com', 'outlook.com', 'outlook.ca', 'msn.com', 'passport.com', 'passport.net'];
 
 export function isMicrosoftDomain(email = '') {
   const domain = email.trim().toLowerCase().split('@')[1] || '';
-  return MS_DOMAINS.includes(domain) || domain.includes('hotmail') || domain.includes('outlook') || domain.includes('live.') || domain.includes('msn');
+  return hasDomainMatch(domain, MS_DOMAINS);
 }
 
 /**

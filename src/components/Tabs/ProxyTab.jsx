@@ -41,9 +41,15 @@ export function ProxyTab({
 
       // Format: user:pass@host:port
       if (line.includes('@')) {
-        const [auth, target] = line.split('@');
-        const [u, p] = auth.split(':');
-        const [h, pt] = target.split(':');
+        const atIndex = line.lastIndexOf('@');
+        const auth = line.slice(0, atIndex);
+        const target = line.slice(atIndex + 1);
+        const authSeparator = auth.indexOf(':');
+        const targetSeparator = target.lastIndexOf(':');
+        const u = authSeparator >= 0 ? auth.slice(0, authSeparator) : auth;
+        const p = authSeparator >= 0 ? auth.slice(authSeparator + 1) : '';
+        const h = targetSeparator >= 0 ? target.slice(0, targetSeparator) : target;
+        const pt = targetSeparator >= 0 ? target.slice(targetSeparator + 1) : '';
         user = u || '';
         pass = p || '';
         host = h || '';
@@ -63,13 +69,14 @@ export function ProxyTab({
         }
       }
 
-      if (host && port && !isNaN(Number(port))) {
+      const numericPort = Number(String(port).trim());
+      if (host && Number.isInteger(numericPort) && numericPort >= 1 && numericPort <= 65535) {
         parsed.push({
           id: `px-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
           raw: line,
           protocol: protocol || 'socks5',
           host: host.trim(),
-          port: Number(port.trim()),
+          port: numericPort,
           user: user.trim(),
           pass: pass.trim(),
           status: 'untested', // untested | working | bad | testing
@@ -104,54 +111,104 @@ export function ProxyTab({
     setShowPasteModal(false);
   };
 
+  const handleDeduplicateProxies = () => {
+    setProxies(prev => {
+      const seen = new Set();
+      const unique = [];
+      for (const p of prev) {
+        const key = `${p.protocol}://${p.user ? p.user + ':' + p.pass + '@' : ''}${p.host}:${p.port}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          unique.push(p);
+        }
+      }
+      return unique;
+    });
+  };
+
+  const handleRemoveBadProxies = () => {
+    setProxies(prev => prev.filter(p => p.status !== 'bad'));
+  };
+
+  const handlePruneSlowProxies = (maxLatencyMs = 1500) => {
+    setProxies(prev => prev.filter(p => {
+      if (p.status === 'bad') return false;
+      if (p.status === 'working' && p.latencyMs && p.latencyMs > maxLatencyMs) return false;
+      return true;
+    }));
+  };
+
+  const handleSortByLatency = () => {
+    setProxies(prev => [...prev].sort((a, b) => {
+      const latA = a.latencyMs ?? 999999;
+      const latB = b.latencyMs ?? 999999;
+      return latA - latB;
+    }));
+  };
+
   const handleTestAllProxies = async () => {
     if (proxies.length === 0 || isTesting) return;
     setIsTesting(true);
     setTestProgress(0);
 
-    const CONCURRENCY = 15;
+    const CONCURRENCY = 10;
     let completed = 0;
     const total = proxies.length;
-
     const proxyQueue = [...proxies];
+
+    const pendingUpdates = new Map();
+    let lastFlush = 0;
+
+    const flushProxies = (force = false) => {
+      const now = Date.now();
+      if (force || (now - lastFlush >= 250 && pendingUpdates.size > 0)) {
+        lastFlush = now;
+        const currentBatch = new Map(pendingUpdates);
+        pendingUpdates.clear();
+        setProxies(prev => prev.map(p => {
+          const upd = currentBatch.get(p.id);
+          return upd ? { ...p, ...upd } : p;
+        }));
+      }
+    };
 
     const worker = async () => {
       while (proxyQueue.length > 0) {
         const px = proxyQueue.shift();
         if (!px) break;
 
-        setProxies(curr => curr.map(p => p.id === px.id ? { ...p, status: 'testing' } : p));
+        pendingUpdates.set(px.id, { status: 'testing' });
+        flushProxies(false);
 
         try {
           const res = await fetch('/api/test-proxy', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ proxy: px, timeout: 5000 })
+            body: JSON.stringify({ proxy: px, timeout: 4000 })
           });
           const data = await res.json();
 
-          setProxies(curr => curr.map(p => {
-            if (p.id === px.id) {
-              return {
-                ...p,
-                status: data.success ? 'working' : 'bad',
-                latencyMs: data.latencyMs || null,
-                error: data.error || null
-              };
-            }
-            return p;
-          }));
+          pendingUpdates.set(px.id, {
+            status: data.success ? 'working' : 'bad',
+            latencyMs: data.latencyMs || null,
+            error: data.error || null
+          });
         } catch (err) {
-          setProxies(curr => curr.map(p => p.id === px.id ? { ...p, status: 'bad', error: err.message } : p));
+          pendingUpdates.set(px.id, {
+            status: 'bad',
+            error: err.message
+          });
         }
 
         completed++;
         setTestProgress(Math.round((completed / total) * 100));
+        flushProxies(false);
       }
     };
 
     const workers = Array.from({ length: Math.min(CONCURRENCY, total) }, () => worker());
     await Promise.all(workers);
+    flushProxies(true);
     setIsTesting(false);
   };
 
@@ -168,13 +225,14 @@ export function ProxyTab({
 
   const filteredProxies = useMemo(() => {
     return proxies.filter(p => {
+      if (!p) return false;
       if (protocolFilter === 'working' && p.status !== 'working') return false;
-      if (protocolFilter === 'socks5' && !p.protocol.includes('socks5')) return false;
-      if (protocolFilter === 'socks4' && !p.protocol.includes('socks4')) return false;
-      if (protocolFilter === 'http' && !p.protocol.includes('http')) return false;
+      if (protocolFilter === 'socks5' && !(p.protocol || '').includes('socks5')) return false;
+      if (protocolFilter === 'socks4' && !(p.protocol || '').includes('socks4')) return false;
+      if (protocolFilter === 'http' && !(p.protocol || '').includes('http')) return false;
       if (searchTerm) {
         const q = searchTerm.toLowerCase();
-        return p.host.toLowerCase().includes(q) || String(p.port).includes(q) || p.protocol.toLowerCase().includes(q);
+        return (p.host || '').toLowerCase().includes(q) || String(p.port || '').includes(q) || (p.protocol || '').toLowerCase().includes(q);
       }
       return true;
     });
@@ -201,7 +259,7 @@ export function ProxyTab({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
       {/* Top Banner & Control Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '24px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(290px, 1fr))', gap: '20px' }}>
         
         {/* Load Proxies Card */}
         <div className="glass-panel" style={{ padding: '24px' }}>
@@ -233,11 +291,23 @@ export function ProxyTab({
               onChange={(e) => e.target.files && handleFileUpload(e.target.files)} />
           </div>
 
-          <div style={{ marginTop: '12px', display: 'flex', gap: '8px' }}>
+          <div style={{ marginTop: '12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
             <button onClick={onLoadSampleProxies}
               style={{ fontSize: '0.72rem', color: '#00e5ff', background: 'none', border: 'none', cursor: 'pointer', fontFamily: "'JetBrains Mono', monospace", display: 'flex', alignItems: 'center', gap: '4px' }}>
               <RefreshCw size={12} /> Load Free Test Proxies
             </button>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <button onClick={handleDeduplicateProxies} disabled={proxies.length === 0}
+                style={{ fontSize: '0.7rem', color: '#00ff9d', background: 'rgba(0,255,157,0.1)', border: '1px solid rgba(0,255,157,0.3)', borderRadius: '6px', padding: '2px 8px', cursor: proxies.length === 0 ? 'not-allowed' : 'pointer', fontFamily: "'JetBrains Mono', monospace" }}>
+                Deduplicate
+              </button>
+              {stats.bad > 0 && (
+                <button onClick={handleRemoveBadProxies}
+                  style={{ fontSize: '0.7rem', color: '#f87171', background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.3)', borderRadius: '6px', padding: '2px 8px', cursor: 'pointer', fontFamily: "'JetBrains Mono', monospace" }}>
+                  Purge Dead ({stats.bad})
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
@@ -307,7 +377,7 @@ export function ProxyTab({
               <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#00ff9d', fontFamily: "'JetBrains Mono', monospace" }}>{stats.working}</div>
             </div>
             <div style={{ background: 'rgba(0,0,0,0.4)', padding: '8px', borderRadius: '8px', border: '1px solid rgba(248,113,113,0.2)' }}>
-              <div style={{ fontSize: '0.6rem', color: '#8b9bb4' }}>BAD / DEAD</div>
+              <div style={{ fontSize: '0.6rem', color: '#8b9bb4', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>DEAD / BAD</div>
               <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#f87171', fontFamily: "'JetBrains Mono', monospace" }}>{stats.bad}</div>
             </div>
           </div>
@@ -365,8 +435,27 @@ export function ProxyTab({
               ))}
             </div>
           </div>
-          <div style={{ fontSize: '0.75rem', color: '#8b9bb4', fontFamily: "'JetBrains Mono', monospace" }}>
-            Showing <span style={{ color: '#fff', fontWeight: 700 }}>{filteredProxies.length}</span> of {proxies.length} Proxies
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button
+              onClick={handleSortByLatency}
+              className="glass-btn"
+              style={{ fontSize: '0.7rem', padding: '4px 8px', color: '#00e5ff', display: 'flex', alignItems: 'center', gap: '4px' }}
+              title="Sort proxies with lowest latency first"
+            >
+              <Zap size={11} /> Sort by Speed
+            </button>
+            <button
+              onClick={() => handlePruneSlowProxies(1500)}
+              className="glass-btn"
+              style={{ fontSize: '0.7rem', padding: '4px 8px', color: '#f87171', display: 'flex', alignItems: 'center', gap: '4px' }}
+              title="Remove proxies with latency >1500ms or dead status"
+            >
+              <Filter size={11} /> Prune Slow (&gt;1.5s)
+            </button>
+            <div style={{ fontSize: '0.75rem', color: '#8b9bb4', fontFamily: "'JetBrains Mono', monospace", marginLeft: '4px' }}>
+              Showing <span style={{ color: '#fff', fontWeight: 700 }}>{filteredProxies.length}</span> of {proxies.length} Proxies
+            </div>
           </div>
         </div>
 

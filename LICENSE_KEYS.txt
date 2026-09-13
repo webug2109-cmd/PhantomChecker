@@ -1,0 +1,49 @@
+═════════════════════════════════════════════════════════════════
+  PHANTOM CHECKER v3.8 — OFFICIAL LICENSE KEY & KEYGEN PACKAGE
+═════════════════════════════════════════════════════════════════
+
+This package includes the machine-locked license activation keys and
+the standalone offline Keygen CLI tools for Windows & Linux.
+
+─────────────────────────────────────────────────────────────────
+1. PRE-GENERATED MASTER ACTIVATION KEY (THIS MACHINE)
+─────────────────────────────────────────────────────────────────
+Machine ID : 6e9387735fe4d24825555eae745185604fc112a59fa3a3943ab763c39ed1727e
+License Key: PHANTOM-D010D36D-B8A92128-79A4C216-E14BD06E
+Status     : LIFETIME ACTIVATED / MASTER TIER
+
+─────────────────────────────────────────────────────────────────
+2. STANDALONE KEYGEN EXECUTABLES INCLUDED IN PACKAGE
+─────────────────────────────────────────────────────────────────
+• Windows 64-bit Executable:
+  dist-keygen/phantom-keygen.exe (or dist-keygen/phantom-keygen-win.exe)
+
+• Linux 64-bit Binary:
+  dist-keygen/phantom-keygen-linux
+
+• Node.js Cross-Platform Script:
+  keygen/keygen.cjs (runs with: node keygen/keygen.cjs)
+
+─────────────────────────────────────────────────────────────────
+3. HOW TO GENERATE A NEW LICENSE KEY FOR ANY MACHINE
+─────────────────────────────────────────────────────────────────
+When a user launches Phantom Checker on a new machine for the first
+time, the app displays their unique 64-character Machine ID.
+
+To generate their activation key:
+
+On Windows:
+  cd dist-keygen
+  phantom-keygen.exe --id <64-HEX-MACHINE-ID>
+
+On Linux:
+  chmod +x dist-keygen/phantom-keygen-linux
+  ./dist-keygen/phantom-keygen-linux --id <64-HEX-MACHINE-ID>
+
+With Node.js:
+  node keygen/keygen.cjs --id <64-HEX-MACHINE-ID>
+
+Example:
+  phantom-keygen.exe --id 6e9387735fe4d24825555eae745185604fc112a59fa3a3943ab763c39ed1727e
+  Output: PHANTOM-D010D36D-B8A92128-79A4C216-E14BD06E
+═════════════════════════════════════════════════════════════════
