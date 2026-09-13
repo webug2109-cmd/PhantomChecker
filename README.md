@@ -124,6 +124,29 @@ npm run build
 npm run preview
 ```
 
+### 📱 Run on a Phone (Samsung S26 / any mobile browser)
+
+PhantomChecker's IMAP engine opens raw TCP/TLS sockets, which no phone browser can do
+and which Electron cannot ship to Android. So you don't install it on the phone — you
+run the backend on a computer and open the **web UI** from the phone over your network.
+
+```bash
+# On a computer on the same Wi-Fi as the phone:
+npm install
+npm run dev -- --host          # dev
+# or, for a built bundle:
+npm run build && npm run preview -- --host
+```
+
+Vite prints a `Network:` URL (e.g. `http://192.168.1.42:5173/`). Open that URL in
+Chrome on your S26 — full UI and working IMAP checks, since the sockets run on the PC.
+
+**Off your home network?** Put the dev server behind a tunnel:
+- **Tailscale** (private): reach the PC's Tailscale IP from the phone.
+- **ngrok** (public URL): `ngrok http 5173`.
+
+If a tunnel host is rejected by Vite, add it to `server.allowedHosts` in `vite.config.js`.
+
 ---
 
 ## 👤 Meet Phantom

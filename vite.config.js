@@ -41,14 +41,11 @@ async function mapConcurrent(items, limit, fn) {
   return results
 }
 
-// https://vite.dev/config/
-export default defineConfig({
-  plugins: [
-    react(),
-    {
-      name: 'live-imap-middleware',
-      configureServer(server) {
-        server.middlewares.use(async (req, res, next) => {
+// Shared IMAP API middleware. Registered on BOTH the dev server (configureServer)
+// and the preview/production server (configurePreviewServer) so a built app served
+// to a phone over the LAN keeps the /api/* backend the frontend depends on.
+function imapApiMiddleware() {
+  return async (req, res, next) => {
           // Endpoint: /api/check-imap
           if (req.url === '/api/check-imap' && req.method === 'POST') {
             try {
@@ -270,9 +267,34 @@ export default defineConfig({
             return
           }
 
-          next()
-        })
-      }
-    }
+    next()
+  }
+}
+
+// https://vite.dev/config/
+export default defineConfig({
+  // host: true binds to 0.0.0.0 so a phone on the same Wi-Fi can reach the app
+  // at http://<your-computer-LAN-IP>:5173. strictPort keeps the URL stable.
+  server: {
+    host: true,
+    port: 5173,
+    strictPort: true,
+  },
+  preview: {
+    host: true,
+    port: 4173,
+    strictPort: true,
+  },
+  plugins: [
+    react(),
+    {
+      name: 'live-imap-middleware',
+      configureServer(server) {
+        server.middlewares.use(imapApiMiddleware())
+      },
+      configurePreviewServer(server) {
+        server.middlewares.use(imapApiMiddleware())
+      },
+    },
   ],
 })
